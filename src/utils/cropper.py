@@ -18,6 +18,7 @@ from .crop import (
 )
 from .io import contiguous
 from .rprint import rlog as log
+from .timer import log_time
 from .face_analysis_diy import FaceAnalysisDIY
 from .human_landmark_runner import LandmarkRunner as HumanLandmark
 
@@ -90,6 +91,7 @@ class Cropper(object):
             if hasattr(self.crop_cfg, k):
                 setattr(self.crop_cfg, k, v)
 
+    @log_time
     def crop_source_image(self, img_rgb_: np.ndarray, crop_cfg: CropConfig):
         # crop a source image and get neccessary information
         img_rgb = img_rgb_.copy()  # copy it
@@ -169,6 +171,7 @@ class Cropper(object):
         return lmk
 
     # TODO: support skipping frame with NO FACE
+    @log_time
     def crop_source_video(self, source_rgb_lst, crop_cfg: CropConfig, **kwargs):
         """Tracking based landmarks/alignment and cropping"""
         trajectory = Trajectory()
@@ -222,6 +225,7 @@ class Cropper(object):
             "M_c2o_lst": trajectory.M_c2o_lst,
         }
 
+    @log_time
     def crop_driving_video(self, driving_rgb_lst, **kwargs):
         """Tracking based landmarks/alignment and cropping"""
         trajectory = Trajectory()
@@ -282,6 +286,7 @@ class Cropper(object):
         }
 
 
+    @log_time
     def calc_lmks_from_cropped_video(self, driving_rgb_crop_lst, **kwargs):
         """Tracking based landmarks/alignment"""
         trajectory = Trajectory()
