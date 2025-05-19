@@ -11,7 +11,7 @@ import cv2
 import torch
 import yaml
 
-from .utils.timer import Timer
+from .utils.timer import Timer, log_time
 from .utils.helper import load_model, concat_feat
 from .utils.camera import headpose_pred_to_degree, get_rotation_matrix
 from .utils.retargeting_utils import calc_eye_close_ratio, calc_lip_close_ratio
@@ -80,6 +80,7 @@ class LivePortraitWrapper(object):
             if hasattr(self.inference_cfg, k):
                 setattr(self.inference_cfg, k, v)
 
+    @log_time
     def prepare_source(self, img: np.ndarray) -> torch.Tensor:
         """ construct the input as standard
         img: HxWx3, uint8, 256x256
@@ -101,6 +102,7 @@ class LivePortraitWrapper(object):
         x = x.to(self.device)
         return x
 
+    @log_time
     def prepare_videos(self, imgs) -> torch.Tensor:
         """ construct the input as standard
         imgs: NxBxHxWx3, uint8
@@ -119,6 +121,7 @@ class LivePortraitWrapper(object):
 
         return y
 
+    @log_time
     def extract_feature_3d(self, x: torch.Tensor) -> torch.Tensor:
         """ get the appearance feature of the image by F
         x: Bx3xHxW, normalized to 0~1
@@ -128,6 +131,7 @@ class LivePortraitWrapper(object):
 
         return feature_3d.float()
 
+    @log_time
     def get_kp_info(self, x: torch.Tensor, **kwargs) -> dict:
         """ get the implicit keypoint information
         x: Bx3xHxW, normalized to 0~1
@@ -273,6 +277,7 @@ class LivePortraitWrapper(object):
 
         return kp_driving
 
+    @log_time
     def warp_decode(self, feature_3d: torch.Tensor, kp_source: torch.Tensor, kp_driving: torch.Tensor) -> torch.Tensor:
         """ get the image after the warping of the implicit keypoints
         feature_3d: Bx32x16x64x64, feature volume
