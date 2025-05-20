@@ -11,6 +11,7 @@ import sys
 import argparse
 import torch
 from src.utils.rprint import rlog as log
+from profiling_graph import parse_profile_table, plot_profile
 
 torch._dynamo.config.suppress_errors = True  # Suppress errors and fall back to eager execution
 
@@ -257,6 +258,11 @@ def main():
         action="store_true",
         help="disable torch.compile for all models",
     )
+    parser.add_argument(
+        "--profile-graph",
+        metavar="PATH",
+        help="save a bar chart of profiling results to the given path",
+    )
     args = parser.parse_args()
 
     # Load configuration
@@ -279,9 +285,14 @@ def main():
     # Measure inference times
     times, overall_times = measure_inference_times(compiled_models, stitching_retargeting_module, inputs)
 
-    if args.profile or args.slow_ops is not None:
+    if args.profile or args.slow_ops is not None or args.profile_graph:
         top_k = args.slow_ops if args.slow_ops is not None else 10
-        profile_models(compiled_models, stitching_retargeting_module, inputs, top_k=top_k)
+        table = profile_models(
+            compiled_models, stitching_retargeting_module, inputs, top_k=top_k
+        )
+        if args.profile_graph:
+            results = parse_profile_table(table)
+            plot_profile(results, args.profile_graph)
 
     # Print benchmark results
     print_benchmark_results(compiled_models, stitching_retargeting_module, ['stitching', 'eye', 'lip'], times, overall_times)
