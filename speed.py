@@ -17,6 +17,7 @@ torch._dynamo.config.suppress_errors = True  # Suppress errors and fall back to 
 import yaml
 import time
 import numpy as np
+from src.utils.profiler import profile_operations
 
 # Enable reasonable defaults for macOS users
 if sys.platform == "darwin":
@@ -35,25 +36,33 @@ def _sync():
         torch.mps.synchronize()
 
 
+def get_device(device_id=0):
+    """Return the best available :class:`torch.device` string."""
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    if torch.cuda.is_available():
+        return f"cuda:{device_id}"
+    return "cpu"
+
+
 def initialize_inputs(batch_size=1, device_id=0):
-    """
-    Generate random input tensors and move them to GPU
-    """
+    """Generate random input tensors and move them to the chosen device."""
+    device = get_device(device_id)
     feature_3d = torch.randn(
-        batch_size, 32, 16, 64, 64, device=device_id, dtype=torch.float16
+        batch_size, 32, 16, 64, 64, device=device, dtype=torch.float16
     )
-    kp_source = torch.randn(batch_size, 21, 3, device=device_id, dtype=torch.float16)
-    kp_driving = torch.randn(batch_size, 21, 3, device=device_id, dtype=torch.float16)
+    kp_source = torch.randn(batch_size, 21, 3, device=device, dtype=torch.float16)
+    kp_driving = torch.randn(batch_size, 21, 3, device=device, dtype=torch.float16)
     source_image = (
-        torch.randn(batch_size, 3, 256, 256, device=device_id, dtype=torch.float16)
+        torch.randn(batch_size, 3, 256, 256, device=device, dtype=torch.float16)
         .to(memory_format=torch.channels_last)
     )
     generator_input = (
-        torch.randn(batch_size, 256, 64, 64, device=device_id, dtype=torch.float16)
+        torch.randn(batch_size, 256, 64, 64, device=device, dtype=torch.float16)
         .to(memory_format=torch.channels_last)
     )
-    eye_close_ratio = torch.randn(batch_size, 3, device=device_id, dtype=torch.float16)
-    lip_close_ratio = torch.randn(batch_size, 2, device=device_id, dtype=torch.float16)
+    eye_close_ratio = torch.randn(batch_size, 3, device=device, dtype=torch.float16)
+    lip_close_ratio = torch.randn(batch_size, 2, device=device, dtype=torch.float16)
     feat_stitching = concat_feat(kp_source, kp_driving).half()
     feat_eye = concat_feat(kp_source, eye_close_ratio).half()
     feat_lip = concat_feat(kp_source, lip_close_ratio).half()
@@ -84,11 +93,22 @@ def load_and_compile_models(cfg, model_config, compile_models=True):
     compile_models : bool, optional
         If ``True``, wrap every module with ``torch.compile``.
     """
-    appearance_feature_extractor = load_model(cfg.checkpoint_F, model_config, cfg.device_id, 'appearance_feature_extractor')
-    motion_extractor = load_model(cfg.checkpoint_M, model_config, cfg.device_id, 'motion_extractor')
-    warping_module = load_model(cfg.checkpoint_W, model_config, cfg.device_id, 'warping_module')
-    spade_generator = load_model(cfg.checkpoint_G, model_config, cfg.device_id, 'spade_generator')
-    stitching_retargeting_module = load_model(cfg.checkpoint_S, model_config, cfg.device_id, 'stitching_retargeting_module')
+    device = get_device(cfg.device_id)
+    appearance_feature_extractor = load_model(
+        cfg.checkpoint_F, model_config, device, 'appearance_feature_extractor'
+    )
+    motion_extractor = load_model(
+        cfg.checkpoint_M, model_config, device, 'motion_extractor'
+    )
+    warping_module = load_model(
+        cfg.checkpoint_W, model_config, device, 'warping_module'
+    )
+    spade_generator = load_model(
+        cfg.checkpoint_G, model_config, device, 'spade_generator'
+    )
+    stitching_retargeting_module = load_model(
+        cfg.checkpoint_S, model_config, device, 'stitching_retargeting_module'
+    )
 
     models_with_params = [
         ('Appearance Feature Extractor', appearance_feature_extractor),
@@ -201,16 +221,10 @@ def print_benchmark_results(compiled_models, stitching_retargeting_module, retar
         print(f"Average inference time for {name} over 100 runs: {avg_time:.2f} ms (std: {std_time:.2f} ms)")
 
 
-def profile_models(compiled_models, stitching_retargeting_module, inputs):
-    """Run a single step under torch.profiler to locate bottlenecks."""
-    activities = [torch.profiler.ProfilerActivity.CPU]
-    if torch.cuda.is_available():
-        activities.append(torch.profiler.ProfilerActivity.CUDA)
-        sort_by = "cuda_time_total"
-    else:
-        sort_by = "self_cpu_time_total"
+def profile_models(compiled_models, stitching_retargeting_module, inputs, top_k=10):
+    """Run a single step under :mod:`torch.profiler` and return the slowest operations."""
 
-    with torch.profiler.profile(activities=activities, record_shapes=True) as prof:
+    def _run_once():
         with torch.no_grad():
             compiled_models['Appearance Feature Extractor'](inputs['source_image'])
             compiled_models['Motion Extractor'](inputs['source_image'])
@@ -219,7 +233,10 @@ def profile_models(compiled_models, stitching_retargeting_module, inputs):
             stitching_retargeting_module['stitching'](inputs['feat_stitching'])
             stitching_retargeting_module['eye'](inputs['feat_eye'])
             stitching_retargeting_module['lip'](inputs['feat_lip'])
-    log(prof.key_averages().table(sort_by=sort_by, row_limit=10))
+
+    table = profile_operations(_run_once, top_k=top_k)
+    log(table)
+    return table
 
 
 def main():
@@ -228,6 +245,13 @@ def main():
     """
     parser = argparse.ArgumentParser(description="Benchmark LivePortrait")
     parser.add_argument("--profile", action="store_true", help="run profiler once")
+    parser.add_argument(
+        "--slow-ops",
+        nargs="?",
+        const=10,
+        type=int,
+        help="display table of the slowest torch operations (optionally specify top K)"
+    )
     parser.add_argument(
         "--no-compile",
         action="store_true",
@@ -242,7 +266,7 @@ def main():
         model_config = yaml.safe_load(file)
 
     # Sample input tensors
-    inputs = initialize_inputs(device_id = cfg.device_id)
+    inputs = initialize_inputs(device_id=cfg.device_id)
 
     # Load and compile models
     compiled_models, stitching_retargeting_module = load_and_compile_models(
@@ -255,8 +279,9 @@ def main():
     # Measure inference times
     times, overall_times = measure_inference_times(compiled_models, stitching_retargeting_module, inputs)
 
-    if args.profile:
-        profile_models(compiled_models, stitching_retargeting_module, inputs)
+    if args.profile or args.slow_ops is not None:
+        top_k = args.slow_ops if args.slow_ops is not None else 10
+        profile_models(compiled_models, stitching_retargeting_module, inputs, top_k=top_k)
 
     # Print benchmark results
     print_benchmark_results(compiled_models, stitching_retargeting_module, ['stitching', 'eye', 'lip'], times, overall_times)
