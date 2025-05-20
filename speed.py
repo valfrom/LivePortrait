@@ -6,12 +6,19 @@ Benchmark the inference speed of each module in LivePortrait.
 TODO: heavy GPT style, need to refactor
 """
 
+import os
+import sys
 import torch
 torch._dynamo.config.suppress_errors = True  # Suppress errors and fall back to eager execution
 
 import yaml
 import time
 import numpy as np
+
+# Enable reasonable defaults for macOS users
+if sys.platform == "darwin":
+    os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+    torch.set_float32_matmul_precision("high")
 
 from src.utils.helper import load_model, concat_feat
 from src.config.inference_config import InferenceConfig

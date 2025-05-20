@@ -5,6 +5,8 @@ The entrance of humans
 """
 
 import os
+import sys
+import torch
 import os.path as osp
 import tyro
 import subprocess
@@ -12,6 +14,11 @@ from src.config.argument_config import ArgumentConfig
 from src.config.inference_config import InferenceConfig
 from src.config.crop_config import CropConfig
 from src.live_portrait_pipeline import LivePortraitPipeline
+
+# Enable reasonable defaults for macOS users
+if sys.platform == "darwin":
+    os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+    torch.set_float32_matmul_precision("high")
 
 
 def partial_fields(target_class, kwargs):
