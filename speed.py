@@ -11,14 +11,14 @@ import sys
 import argparse
 import torch
 from src.utils.rprint import rlog as log
-from profiling_graph import parse_profile_table, plot_profile
+from snakeviz.cli import main as snakeviz_main
 
 torch._dynamo.config.suppress_errors = True  # Suppress errors and fall back to eager execution
 
 import yaml
 import time
 import numpy as np
-from src.utils.profiler import profile_operations
+from src.utils.profiler import profile_operations, run_cprofile
 
 # Enable reasonable defaults for macOS users
 if sys.platform == "darwin":
@@ -222,8 +222,8 @@ def print_benchmark_results(compiled_models, stitching_retargeting_module, retar
         print(f"Average inference time for {name} over 100 runs: {avg_time:.2f} ms (std: {std_time:.2f} ms)")
 
 
-def profile_models(compiled_models, stitching_retargeting_module, inputs, top_k=10):
-    """Run a single step under :mod:`torch.profiler` and return the slowest operations."""
+def profile_models(compiled_models, stitching_retargeting_module, inputs, row_limit=None, cprofile_path=None):
+    """Run one inference step under profilers and return an operation table."""
 
     def _run_once():
         with torch.no_grad():
@@ -235,7 +235,10 @@ def profile_models(compiled_models, stitching_retargeting_module, inputs, top_k=
             stitching_retargeting_module['eye'](inputs['feat_eye'])
             stitching_retargeting_module['lip'](inputs['feat_lip'])
 
-    table = profile_operations(_run_once, top_k=top_k)
+    if cprofile_path:
+        run_cprofile(_run_once, cprofile_path)
+
+    table = profile_operations(_run_once, row_limit=row_limit)
     log(table)
     return table
 
@@ -261,7 +264,7 @@ def main():
     parser.add_argument(
         "--profile-graph",
         metavar="PATH",
-        help="save a bar chart of profiling results to the given path",
+        help="save cProfile stats to this path and open snakeviz",
     )
     args = parser.parse_args()
 
@@ -286,13 +289,15 @@ def main():
     times, overall_times = measure_inference_times(compiled_models, stitching_retargeting_module, inputs)
 
     if args.profile or args.slow_ops is not None or args.profile_graph:
-        top_k = args.slow_ops if args.slow_ops is not None else 10
         table = profile_models(
-            compiled_models, stitching_retargeting_module, inputs, top_k=top_k
+            compiled_models,
+            stitching_retargeting_module,
+            inputs,
+            row_limit=args.slow_ops,
+            cprofile_path=args.profile_graph,
         )
         if args.profile_graph:
-            results = parse_profile_table(table)
-            plot_profile(results, args.profile_graph)
+            snakeviz_main([args.profile_graph])
 
     # Print benchmark results
     print_benchmark_results(compiled_models, stitching_retargeting_module, ['stitching', 'eye', 'lip'], times, overall_times)
