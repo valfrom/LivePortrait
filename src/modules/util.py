@@ -14,8 +14,11 @@ import warnings
 import collections.abc
 from itertools import repeat
 
+fallback_to_torch = False
 
 def grid_sample_3d_mps(inp: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
+    if fallback_to_torch:
+        return F.grid_sample(inp, grid, align_corners=False)
     """Approximate 3D grid sampling using operations supported on MPS."""
     n, c, d, h, w = inp.shape
     dz, dy, dx = grid.shape[1:4]
@@ -46,7 +49,7 @@ def grid_sample_3d_mps(inp: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
 
     def _gather(ix, iy, iz):
         idx = iz * (h * w) + iy * w + ix
-        idx = idx.view(n, -1).unsqueeze(1).expand(-1, c, -1)
+        idx = idx.view(n, -1).unsqueeze(1).expand(-1, c, -1).contiguous()
         val = inp_flat.gather(2, idx)
         return val.view(n, c, dz, dy, dx)
 
@@ -71,6 +74,16 @@ def grid_sample_3d_mps(inp: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
     wf = wx * (1 - wy) * wz
     wg = (1 - wx) * wy * wz
     wh = wx * wy * wz
+
+    # add channel dimension so broadcasting matches (n, c, dz, dy, dx)
+    wa = wa.unsqueeze(1)
+    wb = wb.unsqueeze(1)
+    wc = wc.unsqueeze(1)
+    wd = wd.unsqueeze(1)
+    we = we.unsqueeze(1)
+    wf = wf.unsqueeze(1)
+    wg = wg.unsqueeze(1)
+    wh = wh.unsqueeze(1)
 
     out = wa * Ia + wb * Ib + wc * Ic + wd * Id + we * Ie + wf * If + wg * Ig + wh * Ih
     return out
