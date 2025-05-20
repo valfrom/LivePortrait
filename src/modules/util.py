@@ -127,6 +127,21 @@ def avg_pool3d_mps(inp: torch.Tensor, kernel_size, stride=None, padding=0) -> to
         out = out.to(dtype)
     return out
 
+def upsample_nearest3d_mps(inp: torch.Tensor, scale_factor) -> torch.Tensor:
+    """Nearest neighbor upsampling using repeat for MPS."""
+    if fallback_to_torch:
+        return F.interpolate(inp, scale_factor=scale_factor, mode="nearest")
+
+    sf = to_3tuple(scale_factor)
+    out = inp
+    if sf[0] != 1:
+        out = out.repeat_interleave(sf[0], dim=2)
+    if sf[1] != 1:
+        out = out.repeat_interleave(sf[1], dim=3)
+    if sf[2] != 1:
+        out = out.repeat_interleave(sf[2], dim=4)
+    return out
+
 def kp2gaussian(kp, spatial_size, kp_variance):
     """
     Transform a keypoint into gaussian like representation
