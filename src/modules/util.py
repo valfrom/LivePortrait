@@ -142,6 +142,20 @@ def upsample_nearest3d_mps(inp: torch.Tensor, scale_factor) -> torch.Tensor:
         out = out.repeat_interleave(sf[2], dim=4)
     return out
 
+
+def upsample_nearest2d_mps(inp: torch.Tensor, scale_factor) -> torch.Tensor:
+    """Nearest neighbor 2D upsampling using repeat for MPS."""
+    if fallback_to_torch:
+        return F.interpolate(inp, scale_factor=scale_factor, mode="nearest")
+
+    sf = to_2tuple(scale_factor)
+    out = inp
+    if sf[0] != 1:
+        out = out.repeat_interleave(sf[0], dim=2)
+    if sf[1] != 1:
+        out = out.repeat_interleave(sf[1], dim=3)
+    return out
+
 def kp2gaussian(kp, spatial_size, kp_variance):
     """
     Transform a keypoint into gaussian like representation

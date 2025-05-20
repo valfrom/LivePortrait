@@ -7,7 +7,7 @@ Spade decoder(G) defined in the paper, which input the warped feature to generat
 import torch
 from torch import nn
 import torch.nn.functional as F
-from .util import SPADEResnetBlock
+from .util import SPADEResnetBlock, upsample_nearest2d_mps, fallback_to_torch
 
 
 class SPADEDecoder(nn.Module):
@@ -48,9 +48,15 @@ class SPADEDecoder(nn.Module):
         x = self.G_middle_4(x, seg)
         x = self.G_middle_5(x, seg)
 
-        x = self.up(x)  # Bx512x64x64 -> Bx512x128x128
+        if x.device.type == "mps" and not fallback_to_torch:
+            x = upsample_nearest2d_mps(x, scale_factor=2)
+        else:
+            x = self.up(x)  # Bx512x64x64 -> Bx512x128x128
         x = self.up_0(x, seg)  # Bx512x128x128 -> Bx256x128x128
-        x = self.up(x)  # Bx256x128x128 -> Bx256x256x256
+        if x.device.type == "mps" and not fallback_to_torch:
+            x = upsample_nearest2d_mps(x, scale_factor=2)
+        else:
+            x = self.up(x)  # Bx256x128x128 -> Bx256x256x256
         x = self.up_1(x, seg)  # Bx256x256x256 -> Bx64x256x256
 
         x = self.conv_img(F.leaky_relu(x, 2e-1))  # Bx64x256x256 -> Bx3xHxW
