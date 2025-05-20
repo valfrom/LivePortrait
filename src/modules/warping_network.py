@@ -6,8 +6,9 @@ keypoint representations x_s and x_d, and employs this flow field to warp the so
 """
 
 from torch import nn
+import torch
 import torch.nn.functional as F
-from .util import SameBlock2d
+from .util import SameBlock2d, grid_sample_3d_mps
 from .dense_motion import DenseMotionNetwork
 
 
@@ -44,6 +45,8 @@ class WarpingNetwork(nn.Module):
         self.estimate_occlusion_map = estimate_occlusion_map
 
     def deform_input(self, inp, deformation):
+        if inp.device.type == "mps":
+            return grid_sample_3d_mps(inp, deformation)
         return F.grid_sample(inp, deformation, align_corners=False)
 
     def forward(self, feature_3d, kp_driving, kp_source):

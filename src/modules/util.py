@@ -14,6 +14,67 @@ import warnings
 import collections.abc
 from itertools import repeat
 
+
+def grid_sample_3d_mps(inp: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
+    """Approximate 3D grid sampling using operations supported on MPS."""
+    n, c, d, h, w = inp.shape
+    dz, dy, dx = grid.shape[1:4]
+
+    x = grid[..., 0]
+    y = grid[..., 1]
+    z = grid[..., 2]
+
+    x = ((x + 1) * (w - 1)) / 2
+    y = ((y + 1) * (h - 1)) / 2
+    z = ((z + 1) * (d - 1)) / 2
+
+    x0 = torch.floor(x).clamp(0, w - 1)
+    x1 = (x0 + 1).clamp(0, w - 1)
+    y0 = torch.floor(y).clamp(0, h - 1)
+    y1 = (y0 + 1).clamp(0, h - 1)
+    z0 = torch.floor(z).clamp(0, d - 1)
+    z1 = (z0 + 1).clamp(0, d - 1)
+
+    x0l = x0.long()
+    x1l = x1.long()
+    y0l = y0.long()
+    y1l = y1.long()
+    z0l = z0.long()
+    z1l = z1.long()
+
+    inp_flat = inp.view(n, c, -1)
+
+    def _gather(ix, iy, iz):
+        idx = iz * (h * w) + iy * w + ix
+        idx = idx.view(n, -1).unsqueeze(1).expand(-1, c, -1)
+        val = inp_flat.gather(2, idx)
+        return val.view(n, c, dz, dy, dx)
+
+    Ia = _gather(x0l, y0l, z0l)
+    Ib = _gather(x1l, y0l, z0l)
+    Ic = _gather(x0l, y1l, z0l)
+    Id = _gather(x1l, y1l, z0l)
+    Ie = _gather(x0l, y0l, z1l)
+    If = _gather(x1l, y0l, z1l)
+    Ig = _gather(x0l, y1l, z1l)
+    Ih = _gather(x1l, y1l, z1l)
+
+    wx = x - x0
+    wy = y - y0
+    wz = z - z0
+
+    wa = (1 - wx) * (1 - wy) * (1 - wz)
+    wb = wx * (1 - wy) * (1 - wz)
+    wc = (1 - wx) * wy * (1 - wz)
+    wd = wx * wy * (1 - wz)
+    we = (1 - wx) * (1 - wy) * wz
+    wf = wx * (1 - wy) * wz
+    wg = (1 - wx) * wy * wz
+    wh = wx * wy * wz
+
+    out = wa * Ia + wb * Ib + wc * Ic + wd * Id + we * Ie + wf * If + wg * Ig + wh * Ih
+    return out
+
 def kp2gaussian(kp, spatial_size, kp_variance):
     """
     Transform a keypoint into gaussian like representation
