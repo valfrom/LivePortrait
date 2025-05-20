@@ -250,7 +250,11 @@ class DownBlock3d(nn.Module):
         out = self.conv(x)
         out = self.norm(out)
         out = F.relu(out)
-        out = self.pool(out)
+        # AvgPool3d lacks float16 support on some backends (e.g. CPU/MPS)
+        if out.dtype == torch.float16:
+            out = self.pool(out.to(torch.float32)).to(torch.float16)
+        else:
+            out = self.pool(out)
         return out
 
 
