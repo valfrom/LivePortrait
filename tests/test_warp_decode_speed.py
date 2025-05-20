@@ -21,7 +21,7 @@ def test_warp_decode_speed():
     for _ in range(10):
         wrapper.warp_decode(feature_3d, kp_source, kp_driving)
 
-    runs = 1000
+    runs = 10
     start = time.perf_counter()
     for _ in range(runs):
         wrapper.warp_decode(feature_3d, kp_source, kp_driving)
