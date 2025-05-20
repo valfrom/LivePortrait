@@ -288,7 +288,7 @@ class DownBlock3d(nn.Module):
         out = self.conv(x)
         out = self.norm(out)
         out = F.relu(out)
-        if out.device.type == "mps":
+        if out.device.type == "mps" and not fallback_to_torch:
             out = avg_pool3d_mps(out, kernel_size=(1, 2, 2))
         else:
             # AvgPool3d lacks float16 support on some backends (e.g. CPU)
