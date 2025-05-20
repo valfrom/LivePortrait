@@ -9,9 +9,10 @@ TODO: heavy GPT style, need to refactor
 import os
 import sys
 import argparse
+import subprocess
+from pathlib import Path
 import torch
 from src.utils.rprint import rlog as log
-from snakeviz.cli import main as snakeviz_main
 
 torch._dynamo.config.suppress_errors = True  # Suppress errors and fall back to eager execution
 
@@ -264,7 +265,7 @@ def main():
     parser.add_argument(
         "--profile-graph",
         metavar="PATH",
-        help="save cProfile stats to this path and open snakeviz",
+        help="save cProfile stats to this path and generate a gprof2dot graph",
     )
     args = parser.parse_args()
 
@@ -297,7 +298,18 @@ def main():
             cprofile_path=args.profile_graph,
         )
         if args.profile_graph:
-            snakeviz_main([args.profile_graph])
+            image_path = Path(args.profile_graph).with_suffix(".png")
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "gprof2dot", "-f", "pstats", args.profile_graph],
+                stdout=subprocess.PIPE,
+            )
+            subprocess.check_call([
+                "dot",
+                "-Tpng",
+                "-o",
+                str(image_path),
+            ], stdin=proc.stdout)
+            proc.stdout.close()
 
     # Print benchmark results
     print_benchmark_results(compiled_models, stitching_retargeting_module, ['stitching', 'eye', 'lip'], times, overall_times)
