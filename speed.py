@@ -39,13 +39,21 @@ def initialize_inputs(batch_size=1, device_id=0):
     """
     Generate random input tensors and move them to GPU
     """
-    feature_3d = torch.randn(batch_size, 32, 16, 64, 64).to(device_id).half()
-    kp_source = torch.randn(batch_size, 21, 3).to(device_id).half()
-    kp_driving = torch.randn(batch_size, 21, 3).to(device_id).half()
-    source_image = torch.randn(batch_size, 3, 256, 256).to(device_id).half()
-    generator_input = torch.randn(batch_size, 256, 64, 64).to(device_id).half()
-    eye_close_ratio = torch.randn(batch_size, 3).to(device_id).half()
-    lip_close_ratio = torch.randn(batch_size, 2).to(device_id).half()
+    feature_3d = torch.randn(
+        batch_size, 32, 16, 64, 64, device=device_id, dtype=torch.float16
+    )
+    kp_source = torch.randn(batch_size, 21, 3, device=device_id, dtype=torch.float16)
+    kp_driving = torch.randn(batch_size, 21, 3, device=device_id, dtype=torch.float16)
+    source_image = (
+        torch.randn(batch_size, 3, 256, 256, device=device_id, dtype=torch.float16)
+        .to(memory_format=torch.channels_last)
+    )
+    generator_input = (
+        torch.randn(batch_size, 256, 64, 64, device=device_id, dtype=torch.float16)
+        .to(memory_format=torch.channels_last)
+    )
+    eye_close_ratio = torch.randn(batch_size, 3, device=device_id, dtype=torch.float16)
+    lip_close_ratio = torch.randn(batch_size, 2, device=device_id, dtype=torch.float16)
     feat_stitching = concat_feat(kp_source, kp_driving).half()
     feat_eye = concat_feat(kp_source, eye_close_ratio).half()
     feat_lip = concat_feat(kp_source, lip_close_ratio).half()
@@ -64,9 +72,17 @@ def initialize_inputs(batch_size=1, device_id=0):
     return inputs
 
 
-def load_and_compile_models(cfg, model_config):
-    """
-    Load and compile models for inference
+def load_and_compile_models(cfg, model_config, compile_models=True):
+    """Load models and optionally compile them for inference.
+
+    Parameters
+    ----------
+    cfg : InferenceConfig
+        Configuration with checkpoint paths and device id.
+    model_config : dict
+        Model hyperparameters loaded from YAML.
+    compile_models : bool, optional
+        If ``True``, wrap every module with ``torch.compile``.
     """
     appearance_feature_extractor = load_model(cfg.checkpoint_F, model_config, cfg.device_id, 'appearance_feature_extractor')
     motion_extractor = load_model(cfg.checkpoint_M, model_config, cfg.device_id, 'motion_extractor')
@@ -84,14 +100,16 @@ def load_and_compile_models(cfg, model_config):
     compiled_models = {}
     for name, model in models_with_params:
         model = model.half()
-        model = torch.compile(model, mode='max-autotune')  # Optimize for inference
+        if compile_models:
+            model = torch.compile(model, mode='max-autotune')  # Optimize for inference
         model.eval()  # Switch to evaluation mode
         compiled_models[name] = model
 
     retargeting_models = ['stitching', 'eye', 'lip']
     for retarget in retargeting_models:
         module = stitching_retargeting_module[retarget].half()
-        module = torch.compile(module, mode='max-autotune')  # Optimize for inference
+        if compile_models:
+            module = torch.compile(module, mode='max-autotune')  # Optimize for inference
         module.eval()  # Switch to evaluation mode
         stitching_retargeting_module[retarget] = module
 
@@ -210,6 +228,11 @@ def main():
     """
     parser = argparse.ArgumentParser(description="Benchmark LivePortrait")
     parser.add_argument("--profile", action="store_true", help="run profiler once")
+    parser.add_argument(
+        "--no-compile",
+        action="store_true",
+        help="disable torch.compile for all models",
+    )
     args = parser.parse_args()
 
     # Load configuration
@@ -222,7 +245,9 @@ def main():
     inputs = initialize_inputs(device_id = cfg.device_id)
 
     # Load and compile models
-    compiled_models, stitching_retargeting_module = load_and_compile_models(cfg, model_config)
+    compiled_models, stitching_retargeting_module = load_and_compile_models(
+        cfg, model_config, compile_models=not args.no_compile
+    )
 
     # Warm up models
     warm_up_models(compiled_models, stitching_retargeting_module, inputs)
