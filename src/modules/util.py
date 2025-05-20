@@ -105,6 +105,28 @@ def grid_sample_3d_mps(inp: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
     out = wa * Ia + wb * Ib + wc * Ic + wd * Id + we * Ie + wf * If + wg * Ig + wh * Ih
     return out
 
+def avg_pool3d_mps(inp: torch.Tensor, kernel_size, stride=None, padding=0) -> torch.Tensor:
+    """Approximate 3D average pooling using conv3d so it runs on MPS."""
+    kernel_size = to_3tuple(kernel_size)
+    if stride is None:
+        stride = kernel_size
+    stride = to_3tuple(stride)
+    padding = to_3tuple(padding)
+
+    dtype = inp.dtype
+    x = inp
+    if dtype == torch.float16:
+        x = x.to(torch.float32)
+
+    c = x.shape[1]
+    weight = torch.ones(c, 1, *kernel_size, device=x.device, dtype=x.dtype)
+    weight = weight / (kernel_size[0] * kernel_size[1] * kernel_size[2])
+    out = F.conv3d(x, weight, stride=stride, padding=padding, groups=c)
+
+    if dtype == torch.float16:
+        out = out.to(dtype)
+    return out
+
 def kp2gaussian(kp, spatial_size, kp_variance):
     """
     Transform a keypoint into gaussian like representation
@@ -230,6 +252,7 @@ class DownBlock2d(nn.Module):
         return out
 
 
+# avg_pool3d_mps provides a 3D average pooling implementation that works on MPS.
 class DownBlock3d(nn.Module):
     """
     Downsampling block for use in encoder.
@@ -250,11 +273,14 @@ class DownBlock3d(nn.Module):
         out = self.conv(x)
         out = self.norm(out)
         out = F.relu(out)
-        # AvgPool3d lacks float16 support on some backends (e.g. CPU/MPS)
-        if out.dtype == torch.float16:
-            out = self.pool(out.to(torch.float32)).to(torch.float16)
+        if out.device.type == "mps":
+            out = avg_pool3d_mps(out, kernel_size=(1, 2, 2))
         else:
-            out = self.pool(out)
+            # AvgPool3d lacks float16 support on some backends (e.g. CPU)
+            if out.dtype == torch.float16:
+                out = self.pool(out.to(torch.float32)).to(torch.float16)
+            else:
+                out = self.pool(out)
         return out
 
 
@@ -545,3 +571,4 @@ def _ntuple(n):
     return parse
 
 to_2tuple = _ntuple(2)
+to_3tuple = _ntuple(3)

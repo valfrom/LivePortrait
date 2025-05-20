@@ -111,6 +111,7 @@ The [X-Pose](https://github.com/IDEA-Research/X-Pose) dependency does not suppor
 # for macOS with Apple Silicon users
 pip install -r requirements_macOS.txt
 ```
+3D average pooling now runs natively on MPS via `avg_pool3d_mps`, so less CPU fallback is needed.
 
 ### 2. Download pretrained weights 📥
 
