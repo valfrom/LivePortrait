@@ -241,7 +241,7 @@ class UpBlock3d(nn.Module):
         self.norm = nn.BatchNorm3d(out_features, affine=True)
 
     def forward(self, x):
-        out = F.interpolate(x, scale_factor=(1, 2, 2))
+        out = upsample_nearest3d_mps(x, scale_factor=(1, 2, 2))
         out = self.conv(out)
         out = self.norm(out)
         out = F.relu(out)
