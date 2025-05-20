@@ -8,7 +8,10 @@ TODO: heavy GPT style, need to refactor
 
 import os
 import sys
+import argparse
 import torch
+from src.utils.rprint import rlog as log
+
 torch._dynamo.config.suppress_errors = True  # Suppress errors and fall back to eager execution
 
 import yaml
@@ -22,6 +25,14 @@ if sys.platform == "darwin":
 
 from src.utils.helper import load_model, concat_feat
 from src.config.inference_config import InferenceConfig
+
+
+def _sync():
+    """Synchronize depending on the available backend."""
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    elif hasattr(torch, "mps") and torch.backends.mps.is_available():
+        torch.mps.synchronize()
 
 
 def initialize_inputs(batch_size=1, device_id=0):
@@ -91,7 +102,7 @@ def warm_up_models(compiled_models, stitching_retargeting_module, inputs):
     """
     Warm up models to prepare them for benchmarking
     """
-    print("Warm up start!")
+    log("Warm up start!")
     with torch.no_grad():
         for _ in range(10):
             compiled_models['Appearance Feature Extractor'](inputs['source_image'])
@@ -101,7 +112,7 @@ def warm_up_models(compiled_models, stitching_retargeting_module, inputs):
             stitching_retargeting_module['stitching'](inputs['feat_stitching'])
             stitching_retargeting_module['eye'](inputs['feat_eye'])
             stitching_retargeting_module['lip'](inputs['feat_lip'])
-    print("Warm up end!")
+    log("Warm up end!")
 
 
 def measure_inference_times(compiled_models, stitching_retargeting_module, inputs):
@@ -115,34 +126,34 @@ def measure_inference_times(compiled_models, stitching_retargeting_module, input
 
     with torch.no_grad():
         for _ in range(100):
-            torch.cuda.synchronize()
+            _sync()
             overall_start = time.time()
 
             start = time.time()
             compiled_models['Appearance Feature Extractor'](inputs['source_image'])
-            torch.cuda.synchronize()
+            _sync()
             times['Appearance Feature Extractor'].append(time.time() - start)
 
             start = time.time()
             compiled_models['Motion Extractor'](inputs['source_image'])
-            torch.cuda.synchronize()
+            _sync()
             times['Motion Extractor'].append(time.time() - start)
 
             start = time.time()
             compiled_models['Warping Network'](inputs['feature_3d'], inputs['kp_driving'], inputs['kp_source'])
-            torch.cuda.synchronize()
+            _sync()
             times['Warping Network'].append(time.time() - start)
 
             start = time.time()
             compiled_models['SPADE Decoder'](inputs['generator_input'])  # Adjust input as required
-            torch.cuda.synchronize()
+            _sync()
             times['SPADE Decoder'].append(time.time() - start)
 
             start = time.time()
             stitching_retargeting_module['stitching'](inputs['feat_stitching'])
             stitching_retargeting_module['eye'](inputs['feat_eye'])
             stitching_retargeting_module['lip'](inputs['feat_lip'])
-            torch.cuda.synchronize()
+            _sync()
             times['Stitching and Retargeting Modules'].append(time.time() - start)
 
             overall_times.append(time.time() - overall_start)
@@ -172,10 +183,35 @@ def print_benchmark_results(compiled_models, stitching_retargeting_module, retar
         print(f"Average inference time for {name} over 100 runs: {avg_time:.2f} ms (std: {std_time:.2f} ms)")
 
 
+def profile_models(compiled_models, stitching_retargeting_module, inputs):
+    """Run a single step under torch.profiler to locate bottlenecks."""
+    activities = [torch.profiler.ProfilerActivity.CPU]
+    if torch.cuda.is_available():
+        activities.append(torch.profiler.ProfilerActivity.CUDA)
+        sort_by = "cuda_time_total"
+    else:
+        sort_by = "self_cpu_time_total"
+
+    with torch.profiler.profile(activities=activities, record_shapes=True) as prof:
+        with torch.no_grad():
+            compiled_models['Appearance Feature Extractor'](inputs['source_image'])
+            compiled_models['Motion Extractor'](inputs['source_image'])
+            compiled_models['Warping Network'](inputs['feature_3d'], inputs['kp_driving'], inputs['kp_source'])
+            compiled_models['SPADE Decoder'](inputs['generator_input'])
+            stitching_retargeting_module['stitching'](inputs['feat_stitching'])
+            stitching_retargeting_module['eye'](inputs['feat_eye'])
+            stitching_retargeting_module['lip'](inputs['feat_lip'])
+    log(prof.key_averages().table(sort_by=sort_by, row_limit=10))
+
+
 def main():
     """
     Main function to benchmark speed and model parameters
     """
+    parser = argparse.ArgumentParser(description="Benchmark LivePortrait")
+    parser.add_argument("--profile", action="store_true", help="run profiler once")
+    args = parser.parse_args()
+
     # Load configuration
     cfg = InferenceConfig()
     model_config_path = cfg.models_config
@@ -193,6 +229,9 @@ def main():
 
     # Measure inference times
     times, overall_times = measure_inference_times(compiled_models, stitching_retargeting_module, inputs)
+
+    if args.profile:
+        profile_models(compiled_models, stitching_retargeting_module, inputs)
 
     # Print benchmark results
     print_benchmark_results(compiled_models, stitching_retargeting_module, ['stitching', 'eye', 'lip'], times, overall_times)
