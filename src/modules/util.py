@@ -27,23 +27,24 @@ def grid_sample_3d_mps(inp: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
     y = grid[..., 1]
     z = grid[..., 2]
 
-    x = ((x + 1) * (w - 1)) / 2
-    y = ((y + 1) * (h - 1)) / 2
-    z = ((z + 1) * (d - 1)) / 2
+    # align_corners=False behavior to match torch.nn.functional.grid_sample
+    x = ((x + 1) * w - 1) / 2
+    y = ((y + 1) * h - 1) / 2
+    z = ((z + 1) * d - 1) / 2
 
-    x0 = torch.floor(x).clamp(0, w - 1)
-    x1 = (x0 + 1).clamp(0, w - 1)
-    y0 = torch.floor(y).clamp(0, h - 1)
-    y1 = (y0 + 1).clamp(0, h - 1)
-    z0 = torch.floor(z).clamp(0, d - 1)
-    z1 = (z0 + 1).clamp(0, d - 1)
+    x0 = torch.floor(x)
+    x1 = x0 + 1
+    y0 = torch.floor(y)
+    y1 = y0 + 1
+    z0 = torch.floor(z)
+    z1 = z0 + 1
 
-    x0l = x0.long()
-    x1l = x1.long()
-    y0l = y0.long()
-    y1l = y1.long()
-    z0l = z0.long()
-    z1l = z1.long()
+    x0l = x0.clamp(0, w - 1).long()
+    x1l = x1.clamp(0, w - 1).long()
+    y0l = y0.clamp(0, h - 1).long()
+    y1l = y1.clamp(0, h - 1).long()
+    z0l = z0.clamp(0, d - 1).long()
+    z1l = z1.clamp(0, d - 1).long()
 
     inp_flat = inp.view(n, c, -1)
 
@@ -61,6 +62,22 @@ def grid_sample_3d_mps(inp: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
     If = _gather(x1l, y0l, z1l)
     Ig = _gather(x0l, y1l, z1l)
     Ih = _gather(x1l, y1l, z1l)
+
+    mask_x0 = (x0 >= 0) & (x0 <= w - 1)
+    mask_x1 = (x1 >= 0) & (x1 <= w - 1)
+    mask_y0 = (y0 >= 0) & (y0 <= h - 1)
+    mask_y1 = (y1 >= 0) & (y1 <= h - 1)
+    mask_z0 = (z0 >= 0) & (z0 <= d - 1)
+    mask_z1 = (z1 >= 0) & (z1 <= d - 1)
+
+    Ia = Ia * (mask_x0 & mask_y0 & mask_z0).unsqueeze(1)
+    Ib = Ib * (mask_x1 & mask_y0 & mask_z0).unsqueeze(1)
+    Ic = Ic * (mask_x0 & mask_y1 & mask_z0).unsqueeze(1)
+    Id = Id * (mask_x1 & mask_y1 & mask_z0).unsqueeze(1)
+    Ie = Ie * (mask_x0 & mask_y0 & mask_z1).unsqueeze(1)
+    If = If * (mask_x1 & mask_y0 & mask_z1).unsqueeze(1)
+    Ig = Ig * (mask_x0 & mask_y1 & mask_z1).unsqueeze(1)
+    Ih = Ih * (mask_x1 & mask_y1 & mask_z1).unsqueeze(1)
 
     wx = x - x0
     wy = y - y0
