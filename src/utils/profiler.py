@@ -1,15 +1,17 @@
 import torch
+import cProfile
 
 
-def profile_operations(fn, top_k=10):
-    """Run ``fn`` under :mod:`torch.profiler` and return a table of the slowest operations.
+def profile_operations(fn, row_limit=None):
+    """Run ``fn`` under :mod:`torch.profiler` and return an operations table.
 
     Parameters
     ----------
     fn : Callable
         The function to profile.
-    top_k : int, optional
-        Number of slowest operations to report. Defaults to 10.
+    row_limit : int or None, optional
+        Limit the number of rows returned from :func:`~torch.profiler.profile`.
+        ``None`` means no limit and returns all operations.
     """
     activities = [torch.profiler.ProfilerActivity.CPU]
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() and hasattr(torch.profiler.ProfilerActivity, "MPS"):
@@ -24,4 +26,11 @@ def profile_operations(fn, top_k=10):
     with torch.profiler.profile(activities=activities, record_shapes=True) as prof:
         fn()
 
-    return prof.key_averages().table(sort_by=sort_by, row_limit=top_k)
+    return prof.key_averages().table(sort_by=sort_by, row_limit=row_limit)
+
+
+def run_cprofile(fn, output_path):
+    """Profile ``fn`` with :mod:`cProfile` and dump stats to ``output_path``."""
+    profiler = cProfile.Profile()
+    profiler.runcall(fn)
+    profiler.dump_stats(str(output_path))

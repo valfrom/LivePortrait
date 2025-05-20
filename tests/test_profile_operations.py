@@ -12,6 +12,6 @@ def test_profile_operations_returns_table():
             x = torch.relu(torch.mm(x, x))
         return x
 
-    table = profile_operations(ops, top_k=5)
+    table = profile_operations(ops, row_limit=5)
     assert isinstance(table, str)
     assert "aten::" in table
