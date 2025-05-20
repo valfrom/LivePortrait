@@ -417,7 +417,19 @@ class SPADE(nn.Module):
 
     def forward(self, x, segmap):
         normalized = self.param_free_norm(x)
-        segmap = F.interpolate(segmap, size=x.size()[2:], mode='nearest')
+        if segmap.shape[2:] != x.shape[2:]:
+            if segmap.device.type == "mps" and not fallback_to_torch:
+                if (x.shape[2] % segmap.shape[2] == 0 and
+                        x.shape[3] % segmap.shape[3] == 0):
+                    scale = (
+                        x.shape[2] // segmap.shape[2],
+                        x.shape[3] // segmap.shape[3],
+                    )
+                    segmap = upsample_nearest2d_mps(segmap, scale)
+                else:
+                    segmap = F.interpolate(segmap, size=x.size()[2:], mode="nearest")
+            else:
+                segmap = F.interpolate(segmap, size=x.size()[2:], mode='nearest')
         actv = self.mlp_shared(segmap)
         gamma = self.mlp_gamma(actv)
         beta = self.mlp_beta(actv)
