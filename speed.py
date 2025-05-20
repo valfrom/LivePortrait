@@ -55,14 +55,12 @@ def initialize_inputs(batch_size=1, device_id=0):
     )
     kp_source = torch.randn(batch_size, 21, 3, device=device, dtype=torch.float16)
     kp_driving = torch.randn(batch_size, 21, 3, device=device, dtype=torch.float16)
-    source_image = (
-        torch.randn(batch_size, 3, 256, 256, device=device, dtype=torch.float16)
-        .to(memory_format=torch.channels_last)
-    )
-    generator_input = (
-        torch.randn(batch_size, 256, 64, 64, device=device, dtype=torch.float16)
-        .to(memory_format=torch.channels_last)
-    )
+    source_image = torch.randn(
+        batch_size, 3, 256, 256, device=device, dtype=torch.float16
+    ).contiguous()
+    generator_input = torch.randn(
+        batch_size, 256, 64, 64, device=device, dtype=torch.float16
+    ).contiguous()
     eye_close_ratio = torch.randn(batch_size, 3, device=device, dtype=torch.float16)
     lip_close_ratio = torch.randn(batch_size, 2, device=device, dtype=torch.float16)
     feat_stitching = concat_feat(kp_source, kp_driving).half()

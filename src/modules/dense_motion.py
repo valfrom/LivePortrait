@@ -92,9 +92,9 @@ class DenseMotionNetwork(nn.Module):
         mask = F.softmax(mask, dim=1)  # (bs, 1+num_kp, d=16, h=64, w=64)
         out_dict['mask'] = mask
         mask = mask.unsqueeze(2)                                   # (bs, num_kp+1, 1, d, h, w)
-        sparse_motion = sparse_motion.permute(0, 1, 5, 2, 3, 4)    # (bs, num_kp+1, 3, d, h, w)
+        sparse_motion = sparse_motion.permute(0, 1, 5, 2, 3, 4).contiguous()    # (bs, num_kp+1, 3, d, h, w)
         deformation = (sparse_motion * mask).sum(dim=1)            # (bs, 3, d, h, w)  mask take effect in this place
-        deformation = deformation.permute(0, 2, 3, 4, 1)           # (bs, d, h, w, 3)
+        deformation = deformation.permute(0, 2, 3, 4, 1).contiguous()           # (bs, d, h, w, 3)
 
         out_dict['deformation'] = deformation
 
